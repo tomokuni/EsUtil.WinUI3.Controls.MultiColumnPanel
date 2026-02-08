@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "VerticalColumnPanel.Test (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "VerticalColumnPanel.Test (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

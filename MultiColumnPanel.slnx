@@ -1,0 +1,16 @@
+<Solution>
+  <Configurations>
+    <Platform Name="x64" />
+  </Configurations>
+  <Folder Name="/ソリューション項目/">
+    <File Path="README.md" />
+    <File Path="Spec.md" />
+  </Folder>
+  <Project Path="sample/MultiColumnPanel.Sample.csproj">
+    <Platform Project="x64" />
+  </Project>
+  <Project Path="src/MultiColumnPanel.csproj">
+    <Platform Project="x64" />
+    <Build Solution="Release|*" Project="false" />
+  </Project>
+</Solution>
