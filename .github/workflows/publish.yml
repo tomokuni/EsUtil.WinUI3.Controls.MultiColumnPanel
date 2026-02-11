@@ -143,14 +143,14 @@ jobs:
       - name: ビルドとテスト
         shell: pwsh
         run: |
-          dotnet build "$env:PROJ_PATH" -c Release
+          dotnet build "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders=""
           Get-ChildItem -Recurse -Filter "*[Tt]est*.csproj" | Where-Object { $_.FullName -notmatch "obj|bin" } | ForEach-Object {
             dotnet test $_.FullName -c Release
           }
 
       - name: パッケージ作成の検証
         shell: pwsh
-        run: dotnet pack "$env:PROJ_PATH" -c Release -o dist-check
+        run: dotnet pack "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -o dist-check
 
       - name: アーティファクト保存
         uses: actions/upload-artifact@v4
@@ -197,7 +197,7 @@ jobs:
 
       - name: パッキング
         shell: pwsh
-        run: dotnet pack "$env:PROJ_PATH" -c Release --no-build -o dist
+        run: dotnet pack "$env:PROJ_PATH" -c Release --no-build --no-restore -p:RestoreFallbackFolders="" -o dist
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v1
