@@ -18,7 +18,7 @@
   <!-- プロダクト情報 -->
   <PropertyGroup>
     <Product>MultiColumnPanel</Product>
-    <Version>1.0.0.0</Version>
+    <Version>1.0.0</Version>
     <Description>WinUI 3 custom controls including MultiColumnPanel for optimized multi-column layouts</Description>
     <RootNamespace>EsUtil.WinUI3.Controls.MultiColumnPanel</RootNamespace>
     <AssemblyName>EsUtil.WinUI3.Controls.MultiColumnPanel</AssemblyName>
