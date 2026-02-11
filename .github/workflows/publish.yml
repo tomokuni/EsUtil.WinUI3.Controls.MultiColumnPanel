@@ -158,7 +158,7 @@ jobs:
           name: build-assets
           path: |
             **/bin/Release/**
-            **/obj/Release/**
+            **/obj/**
           if-no-files-found: error
 
   # --------------------------------------------------
