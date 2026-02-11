@@ -6,6 +6,11 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
+# 同じコミット（SHA）での重複実行を防止。タグ push 時の実行を優先し、先行する実行をキャンセル。
+concurrency:
+  group: ${{ github.workflow }}-${{ github.sha }}
+  cancel-in-progress: true
+
 permissions:
   contents: write
 
@@ -87,8 +92,11 @@ jobs:
           echo "Project Path: ${{ env.PROJ_PATH }}"
           echo "Package ID:   ${{ env.PKG_ID }}"
           echo "Target Runner: ${{ needs.setup.outputs.runner }}"
-          echo "GitHub Ref:   ${{ github.ref }}"
-          echo "Ref Type:     ${{ github.ref_type }}"
+          echo "Event Name:    ${{ github.event_name }}"
+          echo "Ref:           ${{ github.ref }}"
+          echo "Ref Type:      ${{ github.ref_type }}"
+          echo "Ref Name:      ${{ github.ref_name }}"
+          echo "SHA:           ${{ github.sha }}"
 
       - name: クローン
         uses: actions/checkout@v4
@@ -143,14 +151,14 @@ jobs:
       - name: ビルドとテスト
         shell: pwsh
         run: |
-          dotnet build "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders=""
+          dotnet build "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true
           Get-ChildItem -Recurse -Filter "*[Tt]est*.csproj" | Where-Object { $_.FullName -notmatch "obj|bin" } | ForEach-Object {
             dotnet test $_.FullName -c Release
           }
 
       - name: パッケージ作成の検証
         shell: pwsh
-        run: dotnet pack "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -o dist-check
+        run: dotnet pack "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist-check
 
       - name: アーティファクト保存
         uses: actions/upload-artifact@v4
@@ -168,17 +176,18 @@ jobs:
     needs: [setup, build]
     # タグ push 時、かつプレリリース（ハイフン付き）でない場合のみ実行
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
-    runs-on: ubuntu-latest
+    runs-on: ${{ needs.setup.outputs.runner }}
 
     env:
       PROJ_PATH: ${{ needs.setup.outputs.project }}
 
     steps:
-      - name: 構成情報の出力
+      - name: リリース情報の出力
         run: |
           echo "Release Version: ${{ github.ref_name }}"
           echo "Target Project:  ${{ env.PROJ_PATH }}"
           echo "Package ID:      ${{ needs.setup.outputs.id }}"
+          echo "Release SHA:     ${{ github.sha }}"
 
       - name: クローン
         uses: actions/checkout@v4
@@ -197,7 +206,7 @@ jobs:
 
       - name: パッキング
         shell: pwsh
-        run: dotnet pack "$env:PROJ_PATH" -c Release --no-build --no-restore -p:RestoreFallbackFolders="" -o dist
+        run: dotnet pack "$env:PROJ_PATH" -c Release --no-build --no-restore -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist
 
       - name: GitHub Release
         uses: softprops/action-gh-release@v1
