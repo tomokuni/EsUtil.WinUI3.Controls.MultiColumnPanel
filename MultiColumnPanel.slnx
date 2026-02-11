@@ -3,8 +3,14 @@
     <Platform Name="x64" />
   </Configurations>
   <Folder Name="/ソリューション項目/">
-    <File Path="README.md" />
+    <File Path=".github/workflows/publish.yml" />
     <File Path="Spec.md" />
+  </Folder>
+  <Folder Name="/ソリューション項目/.github/">
+    <File Path=".github/copilot-instructions.md" />
+  </Folder>
+  <Folder Name="/ソリューション項目/.github/workflows/">
+    <File Path=".github/workflows/publish.yml" />
   </Folder>
   <Project Path="sample/MultiColumnPanel.Sample.csproj">
     <Platform Project="x64" />

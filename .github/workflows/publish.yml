@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   # --------------------------------------------------
-  # 1. Setup & Detection
+  # 1. Setup & Detection (構成情報の自動検知)
   # --------------------------------------------------
   setup:
     runs-on: ubuntu-latest
@@ -21,91 +21,104 @@ jobs:
       runner: ${{ steps.det.outputs.runner }}
       version: ${{ steps.det.outputs.version }}
     steps:
-      - uses: actions/checkout@v4
+      - name: クローン
+        uses: actions/checkout@v4
+
       - id: det
+        name: プロジェクト情報の自動解析
         shell: pwsh
         run: |
-          # プロジェクトの網羅的探索
+          # 1. メインプロジェクトを探索 (Sample や Test を除く)
           $projs = Get-ChildItem -Recurse -Filter "*.csproj" | Where-Object { $_.FullName -notmatch "Sample|Test|obj|bin" }
           if (!$projs) { throw "No projects found." }
 
-          # パッケージ化対象の特定を試みる
+          # 2. パッケージ化設定が含まれるものを優先して特定
           $p = $projs | Where-Object { (Get-Content $_.FullName -Raw) -match "<PackageId>|<GeneratePackageOnBuild>True" } | Select-Object -First 1
           if (!$p) { $p = $projs | Select-Object -First 1 }
 
-          # OSの判定 (WinUI, WPF, WinForms, or windows TFM)
+          # 3. MSBuild プロパティの解決 ( $(Prop) 形式の再帰展開に対応 )
+          [xml]$xml = Get-Content $p.FullName
+          $props = $xml.Project.PropertyGroup
+          function Get-Property($name) {
+            foreach ($pg in $props) {
+              $val = $pg.$name
+              if ($val) {
+                if ($val -match '\$\((.*)\)') { return Get-Property $matches[1] }
+                return $val
+              }
+            }
+            return $null
+          }
+
+          # 4. バージョンとパッケージIDの取得 (不在時は 0.0.1 fallback)
+          $v = Get-Property "Version"
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = "0.0.1" }
+          $id = Get-Property "PackageId" -or Get-Property "AssemblyName" -or $p.BaseName
+
+          # 5. OSランナーの判定 (Windows 特有の技術の使用状況から判断)
           $content = Get-Content $p.FullName -Raw
           $isWin = $content -match "<UseWinUI>true</UseWinUI>|<UseWPF>true</UseWPF>|<UseWindowsForms>true</UseWindowsForms>|-windows"
           $run = if ($isWin) { "windows-latest" } else { "ubuntu-latest" }
 
-          # 属性取得
-          [xml]$xml = Get-Content $p.FullName
-          $v = $xml.Project.PropertyGroup.Version
-          if ([string]::IsNullOrWhiteSpace($v)) { $v = "1.0.0" }
-          $id = $xml.Project.PropertyGroup.PackageId
-          if ([string]::IsNullOrWhiteSpace($id)) { $id = $xml.Project.PropertyGroup.AssemblyName }
-          if ([string]::IsNullOrWhiteSpace($id)) { $id = $p.BaseName }
-
-          # 相対パスの算出
+          # 6. 相対パスの算出と結果の出力
           $rel = $p.FullName.Replace($PWD.Path, "").TrimStart("\").TrimStart("/")
-
-          Write-Host "Detected Project: $rel"
-          Write-Host "Detected Runner: $run"
-
-          # 出力のセット
           "project=$rel" | Add-Content $env:GITHUB_OUTPUT
-          "id=$id" | Add-Content $env:GITHUB_OUTPUT
-          "runner=$run" | Add-Content $env:GITHUB_OUTPUT
-          "version=$v" | Add-Content $env:GITHUB_OUTPUT
+          "id=$id"        | Add-Content $env:GITHUB_OUTPUT
+          "runner=$run"    | Add-Content $env:GITHUB_OUTPUT
+          "version=$v"     | Add-Content $env:GITHUB_OUTPUT
 
   # --------------------------------------------------
-  # 2. Build & Sync (Project Meta & Badges)
+  # 2. Build & Sync (ビルド・テスト・自動同期)
   # --------------------------------------------------
   build:
     needs: setup
     runs-on: ${{ needs.setup.outputs.runner }}
+    env:
+      PROJ_PATH: ${{ needs.setup.outputs.project }}
+      PKG_ID: ${{ needs.setup.outputs.id }}
     steps:
-      - uses: actions/checkout@v4
+      - name: 構成情報の出力
+        run: |
+          echo "Project Path: ${{ needs.setup.outputs.project }}"
+          echo "Package ID:   ${{ needs.setup.outputs.id }}"
+          echo "Target Version: ${{ needs.setup.outputs.version }}"
+
+      - name: クローン
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup .NET
+      - name: .NET セットアップ
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
             8.0.x
             10.0.x
 
-      - name: Sync Meta & Badges
-        id: sync
+      - name: メタデータ & README バッジ同期
         shell: pwsh
         run: |
-          $p = "${{ needs.setup.outputs.project }}"
-          [xml]$xml = Get-Content $p
-
-          # Version 同期 (タグ push 時、csproj をタグ名に合わせる)
+          # 1. タグ push 時は csproj の Version をタグ名に強制同期
+          [xml]$xml = Get-Content $env:PROJ_PATH
           if ("${{ github.ref_type }}" -eq "tag") {
             $tagV = "${{ github.ref_name }}".TrimStart('v')
-            if ($xml.Project.PropertyGroup.Version) {
-              if ($xml.Project.PropertyGroup.Version -ne $tagV) {
-                $xml.Project.PropertyGroup.Version = $tagV
-                $xml.Save($p)
-              }
-            } else {
-              $vNode = $xml.CreateElement("Version")
-              $vNode.InnerText = $tagV
-              $xml.Project.PropertyGroup[0].AppendChild($vNode)
-              $xml.Save($p)
+            $vNode = $xml.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1
+            if ($vNode) { 
+              $vNode.Version = $tagV 
+            } else { 
+              $newV = $xml.CreateElement("Version")
+              $newV.InnerText = $tagV
+              $xml.Project.PropertyGroup[0].AppendChild($newV)
             }
+            $xml.Save($env:PROJ_PATH)
           }
 
-          # README バッジの自動更新
+          # 2. README バッジ (Build/NuGet) の自動更新
           if (Test-Path "README.md") {
             $readme = Get-Content "README.md" -Raw
             $repo = "${{ github.repository }}"
-            $pkg = "${{ needs.setup.outputs.id }}"
             $buildB = "[![Build](https://github.com/$repo/actions/workflows/publish.yml/badge.svg)](https://github.com/$repo/actions/workflows/publish.yml)"
-            $nugetB = "[![NuGet](https://img.shields.io/nuget/v/$pkg.svg)](https://www.nuget.org/packages/$pkg/)"
+            $nugetB = "[![NuGet](https://img.shields.io/nuget/v/$($env:PKG_ID).svg)](https://www.nuget.org/packages/$($env:PKG_ID)/)"
 
             if ($readme -notmatch "\[!\[Build\]") { $readme = "$buildB`n$readme" }
             if ($readme -match "\[!\[NuGet\]") { $readme = $readme -replace "\[!\[NuGet\].*?\)", $nugetB }
@@ -113,26 +126,25 @@ jobs:
             Set-Content "README.md" $readme -NoNewline
           }
 
-          # 変更があれば自動コミット (タグ push 時の変化またはメインブランチでのバッジ更新)
+          # 3. 差分があれば自動コミット (タグ push 時の変化を含む)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
           if (!(git diff --quiet --staged)) {
-            git commit -m "chore: update version/badges [skip ci]"
-            # メインブランチに直接プッシュ
+            git commit -m "chore: auto-sync version and badges [skip ci]"
             git push origin HEAD:${{ github.event.repository.default_branch }}
           }
 
-      - name: Build & Test
+      - name: ビルドとテスト
         shell: pwsh
         run: |
-          dotnet build "${{ needs.setup.outputs.project }}" -c Release
-          # テストプロジェクトがあれば実行
+          dotnet build "$env:PROJ_PATH" -c Release
+          # Test プロジェクトが存在する場合のみ実行
           Get-ChildItem -Recurse -Filter "*[Tt]est*.csproj" | Where-Object { $_.FullName -notmatch "obj|bin" } | ForEach-Object {
             dotnet test $_.FullName -c Release
           }
 
-      - name: Upload Artifacts
+      - name: アーティファクトのアップロード
         uses: actions/upload-artifact@v4
         with:
           name: build-assets
@@ -142,35 +154,45 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------
-  # 3. Publish (NuGet & GitHub Release) - Tags Only
+  # 3. Publish (NuGet & GitHub Release) - タグ push 時のみ実行
   # --------------------------------------------------
   publish:
     needs: [setup, build]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    env:
+      PROJ_PATH: ${{ needs.setup.outputs.project }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Setup .NET
+      - name: 構成情報の出力
+        run: |
+          echo "Pack Target: ${{ needs.setup.outputs.project }}"
+          echo "Package ID:  ${{ needs.setup.outputs.id }}"
+          echo "Version:     ${{ github.ref_name }}"
+
+      - name: クローン
+        uses: actions/checkout@v4
+
+      - name: .NET セットアップ
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
             8.0.x
             10.0.x
 
-      - name: Download Artifacts
+      - name: ビルド資産の取得
         uses: actions/download-artifact@v4
         with:
           name: build-assets
 
-      - name: Pack (--no-build)
-        run: dotnet pack "${{ needs.setup.outputs.project }}" -c Release --no-build -o dist
+      - name: 復元してパッキング
+        run: dotnet pack "$env:PROJ_PATH" -c Release --no-build -o dist
 
-      - name: Create GitHub Release
+      - name: GitHub リリースの作成
         uses: softprops/action-gh-release@v1
         with:
           files: dist/*.nupkg
           generate_release_notes: true
           prerelease: ${{ contains(github.ref_name, '-') }}
 
-      - name: Push to NuGet
+      - name: NuGet 公開
         run: dotnet nuget push dist/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate

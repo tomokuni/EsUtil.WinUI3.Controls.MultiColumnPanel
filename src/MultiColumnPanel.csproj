@@ -44,7 +44,6 @@
   <!-- 追加アイテム -->
   <ItemGroup>
     <Content Include="..\README.md" Pack="true" PackagePath="\" />
-    <Content Include="..\.github\copilot-instructions.md" />
   </ItemGroup>
 
   <!-- プロジェクト 参照 -->
