@@ -8,23 +8,44 @@ permissions:
   contents: write
 
 jobs:
-  publish:
+
+  # ======================================
+  # 1) Windows ジョブ（ビルドのみ）
+  # ======================================
+  build_windows:
     runs-on: windows-latest
+
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      projects: ${{ steps.find_projects.outputs.projects }}
 
     steps:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
 
-    - name: Setup .NET
+    - name: Cache NuGet (Windows)
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: windows-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          windows-nuget-
+
+    - name: Cache build folders (incremental)
+      uses: actions/cache@v4
+      with:
+        path: |
+          src/**/obj
+          src/**/bin
+        key: windows-build-${{ hashFiles('**/*.csproj') }}
+
+    - name: Setup .NET (Windows)
       uses: actions/setup-dotnet@v4
       with:
         dotnet-version: 8.0.x
-        source-url: https://api.nuget.org/v3/index.json
-      env:
-        NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-    # bash で csproj を列挙
+    # csproj を列挙
     - name: Find csproj in src/
       id: find_projects
       shell: bash
@@ -34,56 +55,99 @@ jobs:
         echo "$PROJECTS" >> $GITHUB_OUTPUT
         echo "EOF" >> $GITHUB_OUTPUT
 
-    # 最大バージョンを取得
+    # <Version> タグから最大バージョンを抽出
     - name: Get max version from all projects
       id: get_version
       shell: bash
       run: |
         MAX_VERSION="0.0.0"
         for PROJ in ${{ steps.find_projects.outputs.projects }}; do
-          VER=$(grep -oPm1 "(?<=<Version>)[^<]+" "$PROJ")
-          printf '%s\n%s\n' "$MAX_VERSION" "$VER" | sort -V | tail -n1 > tmp.txt
-          MAX_VERSION=$(cat tmp.txt)
+          VER=$(sed -n 's|.*<Version>\(.*\)</Version>.*|\1|p' "$PROJ")
+          if [ -n "$VER" ]; then
+            printf '%s\n%s\n' "$MAX_VERSION" "$VER" | sort -V | tail -n1 > tmp.txt
+            MAX_VERSION=$(cat tmp.txt)
+          fi
         done
         echo "VERSION=$MAX_VERSION" >> $GITHUB_ENV
         echo "version=$MAX_VERSION" >> $GITHUB_OUTPUT
 
-    # バージョンの比較
-    - name: Check if version is new
-      id: check_version
-      shell: bash
-      run: |
-        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-        CURRENT_TAG="v${{ env.VERSION }}"
-        echo "Latest tag: $LATEST_TAG"
-        echo "Current version: $CURRENT_TAG"
-
-        if [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
-          echo "is_new_version=true" >> $GITHUB_OUTPUT
-        else
-          echo "is_new_version=false" >> $GITHUB_OUTPUT
-        fi
-
-    # ビルド
-    - name: Build all projects
-      if: steps.check_version.outputs.is_new_version == 'true'
+    - name: Build all projects (Windows)
       shell: bash
       run: |
         for PROJ in ${{ steps.find_projects.outputs.projects }}; do
           dotnet build "$PROJ" -c Release
         done
 
-    # pack
-    - name: Pack all projects
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-output
+        path: src/**/bin/Release/**/*
+
+
+  # ======================================
+  # 2) Ubuntu ジョブ（pack / tag / release / publish）
+  # ======================================
+  pack_publish_ubuntu:
+    needs: build_windows
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Restore version
+      run: echo "VERSION=${{ needs.build_windows.outputs.version }}" >> $GITHUB_ENV
+
+    - name: Cache NuGet (Ubuntu)
+      uses: actions/cache@v4
+      with:
+        path: ~/.nuget/packages
+        key: ubuntu-nuget-${{ hashFiles('**/*.csproj') }}
+        restore-keys: |
+          ubuntu-nuget-
+
+    - name: Setup .NET (Ubuntu)
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: 8.0.x
+        source-url: https://api.nuget.org/v3/index.json
+      env:
+        NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Download build artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: build-output
+        path: build
+
+    # version 比較（Ubuntuで高速）
+    - name: Check if version is new
+      id: check_version
+      shell: bash
+      run: |
+        LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
+        CURRENT_TAG="v${{ env.VERSION }}"
+        if [ "$CURRENT_TAG" != "$LATEST_TAG" ]; then
+          echo "is_new_version=true" >> $GITHUB_OUTPUT
+        else
+          echo "is_new_version=false" >> $GITHUB_OUTPUT
+        fi
+
+    # parallel pack（完全並列化）
+    - name: Parallel pack all projects
       if: steps.check_version.outputs.is_new_version == 'true'
       shell: bash
       run: |
         mkdir -p artifacts
-        for PROJ in ${{ steps.find_projects.outputs.projects }}; do
-          dotnet pack "$PROJ" -c Release -o ./artifacts
+        for PROJ in ${{ needs.build_windows.outputs.projects }}; do
+          (
+            dotnet pack "$PROJ" -c Release -o ./artifacts
+          ) &
         done
+        wait
 
-    # Git タグ作成
     - name: Create Git Tag
       if: steps.check_version.outputs.is_new_version == 'true'
       shell: bash
@@ -93,7 +157,6 @@ jobs:
         git tag "v${{ env.VERSION }}"
         git push origin "v${{ env.VERSION }}"
 
-    # Release 作成
     - name: Create GitHub Release
       if: steps.check_version.outputs.is_new_version == 'true'
       uses: softprops/action-gh-release@v1
@@ -102,7 +165,6 @@ jobs:
         files: artifacts/*.nupkg
         generate_release_notes: true
 
-    # NuGet.org へ push
     - name: Push to NuGet
       if: steps.check_version.outputs.is_new_version == 'true'
       shell: bash
