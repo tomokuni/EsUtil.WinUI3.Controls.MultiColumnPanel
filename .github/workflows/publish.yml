@@ -75,4 +75,3 @@ jobs:
         version: ${{ needs.build.outputs.version }}
         projects: ${{ needs.build.outputs.projects }}
         api-key: ${{ secrets.NUGET_API_KEY }}
-``
