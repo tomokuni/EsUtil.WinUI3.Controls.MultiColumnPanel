@@ -178,59 +178,12 @@ jobs:
             dotnet test $_.FullName -c Release
           }
 
-      - name: パッケージ作成の検証
+      - name: パッケージの作成
         shell: pwsh
-        run: dotnet pack "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist-check
-
-      - name: アーティファクト保存
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-assets
-          path: |
-            **/bin/Release/**
-            **/obj/**
-          if-no-files-found: error
-
-  # --------------------------------------------------
-  # 3. Publish (NuGet & GitHub Release)
-  # --------------------------------------------------
-  publish:
-    needs: [setup, build]
-    # 検知された情報に基づきリリース要否を判定
-    if: needs.setup.outputs.is_release == 'true'
-    runs-on: ${{ needs.setup.outputs.runner }}
-
-    env:
-      PROJ_PATH: ${{ needs.setup.outputs.project }}
-
-    steps:
-      - name: リリース情報の出力
-        run: |
-          echo "Release Version: ${{ needs.setup.outputs.tag_name }}"
-          echo "Target Project:  ${{ env.PROJ_PATH }}"
-          echo "Package ID:      ${{ needs.setup.outputs.id }}"
-          echo "Release SHA:     ${{ github.sha }}"
-
-      - name: クローン
-        uses: actions/checkout@v4
-
-      - name: .NET セットアップ
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            10.0.x
-
-      - name: ビルド結果の取得
-        uses: actions/download-artifact@v4
-        with:
-          name: build-assets
-
-      - name: パッキング
-        shell: pwsh
-        run: dotnet pack "$env:PROJ_PATH" -c Release --no-build --no-restore -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist
+        run: dotnet pack "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist
 
       - name: GitHub Release
+        if: needs.setup.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.setup.outputs.tag_name }}
@@ -240,4 +193,16 @@ jobs:
           generate_release_notes: true
 
       - name: NuGet 公開
+        if: needs.setup.outputs.is_release == 'true'
         run: dotnet nuget push dist/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: アーティファクト保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-assets
+          path: |
+            **/bin/Release/**
+            **/obj/**
+            dist/*.nupkg
+            dist/*.snupkg
+          if-no-files-found: error
