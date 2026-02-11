@@ -26,10 +26,14 @@ jobs:
       id: ${{ steps.det.outputs.id }}
       runner: ${{ steps.det.outputs.runner }}
       version: ${{ steps.det.outputs.version }}
+      is_release: ${{ steps.det.outputs.is_release }}
+      tag_name: ${{ steps.det.outputs.tag_name }}
 
     steps:
       - name: クローン
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - id: det
         name: プロジェクト情報の自動解析
@@ -62,7 +66,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($v)) { $v = "0.0.1" }
           $id = Get-Property "PackageId" -or Get-Property "AssemblyName" -or $p.BaseName
 
-          # 5. OSランナーの判定 (Windows 特有の技術の使用状況から判断)
+          # 5. OSランナーの判定 (Windows 特有 of 技術の使用状況から判断)
           $content = Get-Content $p.FullName -Raw
           $isWin = $content -match "<UseWinUI>true</UseWinUI>|<UseWPF>true</UseWPF>|<UseWindowsForms>true</UseWindowsForms>|-windows"
           $run = if ($isWin) { "windows-latest" } else { "ubuntu-latest" }
@@ -74,6 +78,16 @@ jobs:
           "id=$id"        | Add-Content $env:GITHUB_OUTPUT
           "runner=$run"    | Add-Content $env:GITHUB_OUTPUT
           "version=$v"     | Add-Content $env:GITHUB_OUTPUT
+
+          # 7. リリース判定 (タグが現在のコミットを指しているか確認)
+          # ブランチプッシュとタグプッシュが同時に起きた際、どちらのイベントが生き残ってもリリース可能にする
+          $tag = git tag --points-at HEAD | Where-Object { $_ -match "^v\d" } | Select-Object -First 1
+          if ([string]::IsNullOrWhiteSpace($tag) -and "${{ github.ref_type }}" -eq "tag") {
+            $tag = "${{ github.ref_name }}"
+          }
+          $isRel = (![string]::IsNullOrWhiteSpace($tag) -and $tag -notmatch "-")
+          "is_release=$($isRel.ToString().ToLower())" | Add-Content $env:GITHUB_OUTPUT
+          "tag_name=$tag" | Add-Content $env:GITHUB_OUTPUT
 
   # --------------------------------------------------
   # 2. Build & Sync (共通: ビルド・テスト・同期)
@@ -93,9 +107,8 @@ jobs:
           echo "Package ID:   ${{ env.PKG_ID }}"
           echo "Target Runner: ${{ needs.setup.outputs.runner }}"
           echo "Event Name:    ${{ github.event_name }}"
-          echo "Ref:           ${{ github.ref }}"
-          echo "Ref Type:      ${{ github.ref_type }}"
-          echo "Ref Name:      ${{ github.ref_name }}"
+          echo "Is Release:    ${{ needs.setup.outputs.is_release }}"
+          echo "Detected Tag:  ${{ needs.setup.outputs.tag_name }}"
           echo "SHA:           ${{ github.sha }}"
 
       - name: クローン
@@ -113,10 +126,10 @@ jobs:
       - name: バージョン & バッジ同期
         shell: pwsh
         run: |
-          # 1. タグ push 時のみ csproj の Version を同期
+          # 1. リリース判定時は csproj の Version をタグ名（v除去）に強制同期
           [xml]$xml = Get-Content $env:PROJ_PATH
-          if ("${{ github.ref_type }}" -eq "tag") {
-            $tagV = "${{ github.ref_name }}".TrimStart('v')
+          if ("${{ needs.setup.outputs.is_release }}" -eq "true") {
+            $tagV = "${{ needs.setup.outputs.tag_name }}".TrimStart('v')
             $vNode = $xml.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1
             if ($vNode) { $vNode.Version = $tagV } 
             else { 
@@ -170,12 +183,12 @@ jobs:
           if-no-files-found: error
 
   # --------------------------------------------------
-  # 3. Publish (NuGet & GitHub Release) - タグ push、かつ非プレリリースのみ
+  # 3. Publish (NuGet & GitHub Release)
   # --------------------------------------------------
   publish:
     needs: [setup, build]
-    # タグ push 時、かつプレリリース（ハイフン付き）でない場合のみ実行
-    if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
+    # 検知された情報に基づきリリース要否を判定
+    if: needs.setup.outputs.is_release == 'true'
     runs-on: ${{ needs.setup.outputs.runner }}
 
     env:
@@ -184,7 +197,7 @@ jobs:
     steps:
       - name: リリース情報の出力
         run: |
-          echo "Release Version: ${{ github.ref_name }}"
+          echo "Release Version: ${{ needs.setup.outputs.tag_name }}"
           echo "Target Project:  ${{ env.PROJ_PATH }}"
           echo "Package ID:      ${{ needs.setup.outputs.id }}"
           echo "Release SHA:     ${{ github.sha }}"
@@ -209,9 +222,12 @@ jobs:
         run: dotnet pack "$env:PROJ_PATH" -c Release --no-build --no-restore -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist
 
       - name: GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
-          files: dist/*.nupkg
+          tag_name: ${{ needs.setup.outputs.tag_name }}
+          files: |
+            dist/*.nupkg
+            dist/*.snupkg
           generate_release_notes: true
 
       - name: NuGet 公開
