@@ -182,6 +182,25 @@ jobs:
         shell: pwsh
         run: dotnet pack "$env:PROJ_PATH" -c Release -p:RestoreFallbackFolders="" -p:DisableImplicitNuGetFallbackFolder=true -o dist
 
+      - name: NuGet API キー確認
+        if: needs.setup.outputs.is_release == 'true'
+        shell: pwsh
+        run: |
+          if ($env:NUGET_KEY -eq $null -or $env:NUGET_KEY -eq "") {
+            Write-Error "GitHub Secrets に NUGET_API_KEY が設定されていません。Settings > Secrets から設定を確認してください。"
+            exit 1
+          }
+        env:
+          NUGET_KEY: ${{ secrets.NUGET_API_KEY }}
+
+      - name: NuGet Publish
+        if: needs.setup.outputs.is_release == 'true'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist/*.nupkg | ForEach-Object {
+            dotnet nuget push $_.FullName --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+          }
+
       - name: GitHub Release
         if: needs.setup.outputs.is_release == 'true'
         uses: softprops/action-gh-release@v2
@@ -191,14 +210,6 @@ jobs:
             dist/*.nupkg
             dist/*.snupkg
           generate_release_notes: true
-
-      - name: NuGet 公開
-        if: needs.setup.outputs.is_release == 'true'
-        shell: pwsh
-        run: |
-          Get-ChildItem dist/*.nupkg | ForEach-Object {
-            dotnet nuget push $_.FullName --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
-          }
 
       - name: アーティファクト保存
         uses: actions/upload-artifact@v4
