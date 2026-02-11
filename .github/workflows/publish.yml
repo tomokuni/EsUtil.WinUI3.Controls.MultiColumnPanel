@@ -113,7 +113,7 @@ jobs:
             $xml.Save($env:PROJ_PATH)
           }
 
-          # 2. README バッジ (Build/NuGet) の自動更新
+            # 2. README バッジ (Build/NuGet) の自動更新
           if (Test-Path "README.md") {
             $readme = Get-Content "README.md" -Raw
             $repo = "${{ github.repository }}"
@@ -121,8 +121,9 @@ jobs:
             $nugetB = "[![NuGet](https://img.shields.io/nuget/v/$($env:PKG_ID).svg)](https://www.nuget.org/packages/$($env:PKG_ID)/)"
 
             if ($readme -notmatch "\[!\[Build\]") { $readme = "$buildB`n$readme" }
-            if ($readme -match "\[!\[NuGet\]") { $readme = $readme -replace "\[!\[NuGet\].*?\)", $nugetB }
-            elseif ($readme -match "\[!\[Build\]") { $readme = $readme -replace "(\[!\[Build\].*?\))", "`$1 $nugetB" }
+            # カッコが2対ある Markdown リンク形式 [![]()]() を正しく置換
+            if ($readme -match "\[!\[NuGet\]") { $readme = $readme -replace "\[!\[NuGet\].*?\)\s*\(.*?\)", $nugetB }
+            elseif ($readme -match "\[!\[Build\]") { $readme = $readme -replace "(\[!\[Build\].*?\)\s*\(.*?\))", "`$1 $nugetB" }
             Set-Content "README.md" $readme -NoNewline
           }
 

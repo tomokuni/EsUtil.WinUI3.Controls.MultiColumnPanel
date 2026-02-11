@@ -1,5 +1,5 @@
 # MultiColumnPanel
-[![Build](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/actions/workflows/publish.yml/badge.svg)](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/actions/workflows/publish.yml) [![NuGet](https://img.shields.io/nuget/v/EsUtil.WinUI3.Controls.MultiColumnPanel.svg)](https://www.nuget.org/packages/EsUtil.WinUI3.Controls.MultiColumnPanel/)](https://www.nuget.org/packages/EsUtil.WinUI3.Controls.MultiColumnPanel/)
+[![Build](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/actions/workflows/publish.yml/badge.svg)](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/actions/workflows/publish.yml) [![NuGet](https://img.shields.io/nuget/v/EsUtil.WinUI3.Controls.MultiColumnPanel.svg)](https://www.nuget.org/packages/EsUtil.WinUI3.Controls.MultiColumnPanel/)
 
 ## 概要
 MultiColumnPanel は、WinUI3 向けの抽象パネルクラスで、ItemsSource と XAML で直接追加された子要素の両方を同時に扱う機能を提供します。ItemsControl の ItemsPanel として 100% 置き換え可能な互換性を有します。垂直方向にアイテムを複数列配置し、高さを自動計算するカスタムパネルです。
