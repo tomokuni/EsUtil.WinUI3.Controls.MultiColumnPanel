@@ -89,6 +89,15 @@ jobs:
           "is_release=$($isRel.ToString().ToLower())" | Add-Content $env:GITHUB_OUTPUT
           "tag_name=$tag" | Add-Content $env:GITHUB_OUTPUT
 
+      - name: 解析結果の出力
+        run: |
+          echo "Project Path: ${{ steps.det.outputs.project }}"
+          echo "Package ID:   ${{ steps.det.outputs.id }}"
+          echo "Target Runner: ${{ steps.det.outputs.runner }}"
+          echo "Version:      ${{ steps.det.outputs.version }}"
+          echo "Is Release:    ${{ steps.det.outputs.is_release }}"
+          echo "Tag Name:      ${{ steps.det.outputs.tag_name }}"
+
   # --------------------------------------------------
   # 2. Build & Sync (共通: ビルド・テスト・同期)
   # --------------------------------------------------
