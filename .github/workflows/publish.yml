@@ -195,7 +195,10 @@ jobs:
       - name: NuGet 公開
         if: needs.setup.outputs.is_release == 'true'
         shell: pwsh
-        run: dotnet nuget push dist/*.nupkg --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+        run: |
+          Get-ChildItem dist/*.nupkg | ForEach-Object {
+            dotnet nuget push $_.FullName --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+          }
 
       - name: アーティファクト保存
         uses: actions/upload-artifact@v4
