@@ -25,24 +25,38 @@ jobs:
       - id: det
         shell: pwsh
         run: |
-          # メインプロジェクトの探索 (優先順位: /src, パッケージ化設定あり, 最初に見つかったもの)
+          # プロジェクトの網羅的探索
           $projs = Get-ChildItem -Recurse -Filter "*.csproj" | Where-Object { $_.FullName -notmatch "Sample|Test|obj|bin" }
-          $p = $projs | Where-Object { (Get-Content $_.FullName) -match "<PackageId>|<GeneratePackageOnBuild>True" } | Select-Object -First 1
+          if (!$projs) { throw "No projects found." }
+
+          # パッケージ化対象の特定を試みる
+          $p = $projs | Where-Object { (Get-Content $_.FullName -Raw) -match "<PackageId>|<GeneratePackageOnBuild>True" } | Select-Object -First 1
           if (!$p) { $p = $projs | Select-Object -First 1 }
 
-          # OSの判定 (Windows 特有の技術または TFM をチェック)
+          # OSの判定 (WinUI, WPF, WinForms, or windows TFM)
           $content = Get-Content $p.FullName -Raw
           $isWin = $content -match "<UseWinUI>true</UseWinUI>|<UseWPF>true</UseWPF>|<UseWindowsForms>true</UseWindowsForms>|-windows"
+          $run = if ($isWin) { "windows-latest" } else { "ubuntu-latest" }
 
           # 属性取得
           [xml]$xml = Get-Content $p.FullName
-          $v = $xml.Project.PropertyGroup.Version -or "1.0.0"
-          $id = $xml.Project.PropertyGroup.PackageId -or $xml.Project.PropertyGroup.AssemblyName -or $p.BaseName
+          $v = $xml.Project.PropertyGroup.Version
+          if ([string]::IsNullOrWhiteSpace($v)) { $v = "1.0.0" }
+          $id = $xml.Project.PropertyGroup.PackageId
+          if ([string]::IsNullOrWhiteSpace($id)) { $id = $xml.Project.PropertyGroup.AssemblyName }
+          if ([string]::IsNullOrWhiteSpace($id)) { $id = $p.BaseName }
 
-          echo "project=$($p.FullName)" >> $GITHUB_OUTPUT
-          echo "id=$id" >> $GITHUB_OUTPUT
-          echo "runner=$($isWin ? 'windows-latest' : 'ubuntu-latest')" >> $GITHUB_OUTPUT
-          echo "version=$v" >> $GITHUB_OUTPUT
+          # 相対パスの算出
+          $rel = $p.FullName.Replace($PWD.Path, "").TrimStart("\").TrimStart("/")
+
+          Write-Host "Detected Project: $rel"
+          Write-Host "Detected Runner: $run"
+
+          # 出力のセット
+          "project=$rel" | Add-Content $env:GITHUB_OUTPUT
+          "id=$id" | Add-Content $env:GITHUB_OUTPUT
+          "runner=$run" | Add-Content $env:GITHUB_OUTPUT
+          "version=$v" | Add-Content $env:GITHUB_OUTPUT
 
   # --------------------------------------------------
   # 2. Build & Sync (Project Meta & Badges)
@@ -69,11 +83,18 @@ jobs:
           $p = "${{ needs.setup.outputs.project }}"
           [xml]$xml = Get-Content $p
 
-          # Version 同期 (タグが打たれた際、csproj 側が古ければ合わせる)
+          # Version 同期 (タグ push 時、csproj をタグ名に合わせる)
           if ("${{ github.ref_type }}" -eq "tag") {
             $tagV = "${{ github.ref_name }}".TrimStart('v')
-            if ($xml.Project.PropertyGroup.Version -ne $tagV) {
-              $xml.Project.PropertyGroup.Version = $tagV
+            if ($xml.Project.PropertyGroup.Version) {
+              if ($xml.Project.PropertyGroup.Version -ne $tagV) {
+                $xml.Project.PropertyGroup.Version = $tagV
+                $xml.Save($p)
+              }
+            } else {
+              $vNode = $xml.CreateElement("Version")
+              $vNode.InnerText = $tagV
+              $xml.Project.PropertyGroup[0].AppendChild($vNode)
               $xml.Save($p)
             }
           }
@@ -92,12 +113,13 @@ jobs:
             Set-Content "README.md" $readme -NoNewline
           }
 
-          # 変更があれば自動コミット
+          # 変更があれば自動コミット (タグ push 時の変化またはメインブランチでのバッジ更新)
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
           if (!(git diff --quiet --staged)) {
             git commit -m "chore: update version/badges [skip ci]"
+            # メインブランチに直接プッシュ
             git push origin HEAD:${{ github.event.repository.default_branch }}
           }
 
@@ -107,7 +129,7 @@ jobs:
           dotnet build "${{ needs.setup.outputs.project }}" -c Release
           # テストプロジェクトがあれば実行
           Get-ChildItem -Recurse -Filter "*[Tt]est*.csproj" | Where-Object { $_.FullName -notmatch "obj|bin" } | ForEach-Object {
-            dotnet test $_.FullName -c Release --no-build
+            dotnet test $_.FullName -c Release
           }
 
       - name: Upload Artifacts
