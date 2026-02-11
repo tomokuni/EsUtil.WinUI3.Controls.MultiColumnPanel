@@ -13,6 +13,7 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <GeneratePackageOnBuild>True</GeneratePackageOnBuild>
     <Platforms>x64</Platforms>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
   </PropertyGroup>
     
   <!-- プロダクト情報 -->
