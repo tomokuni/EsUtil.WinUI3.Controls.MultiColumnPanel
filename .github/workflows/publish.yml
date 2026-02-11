@@ -156,10 +156,26 @@ jobs:
             $readme = Get-Content "README.md" -Raw
             $repo = "${{ github.repository }}"
             $buildB = "[![Build](https://github.com/$repo/actions/workflows/publish.yml/badge.svg)](https://github.com/$repo/actions/workflows/publish.yml)"
+            $releaseB = "[![GitHub release](https://img.shields.io/github/v/release/$repo.svg)](https://github.com/$repo/releases)"
             $nugetB = "[![NuGet](https://img.shields.io/nuget/v/$($env:PKG_ID).svg)](https://www.nuget.org/packages/$($env:PKG_ID)/)"
-            if ($readme -notmatch "\[!\[Build\]") { $readme = "$buildB`n$readme" }
-            if ($readme -match "\[!\[NuGet\]") { $readme = $readme -replace '\[!\[NuGet\].*?\)\]\(.*?\)', $nugetB }
-            elseif ($readme -match "\[!\[Build\]") { $readme = $readme -replace '(\[!\[Build\].*?\)\]\(.*?\))', "`$1 $nugetB" }
+            $dotnetB = "[![.NET](https://img.shields.io/badge/.NET-10.0-512bd4.svg?logo=dotnet)](https://dotnet.microsoft.com/)"
+            $winuiB = "[![WinUI 3](https://img.shields.io/badge/WinUI-3-0078d4.svg?logo=windows)](https://learn.microsoft.com/windows/apps/winui/winui3/)"
+
+            # 各バッジの更新または追加（指定順序：.NET, WinUI, Build, Release, NuGet）
+            $badges = @($dotnetB, $winuiB, $buildB, $releaseB, $nugetB)
+            $newBadgeLine = $badges -join " "
+
+            # 既存のバッジ行（.NET または Build から始まる行）を探して置換、なければ先頭に挿入
+            if ($readme -match "\[!\[\.NET\].*") {
+              $readme = $readme -replace "\[!\[\.NET\].*", $newBadgeLine
+            }
+            elseif ($readme -match "\[!\[Build\].*") {
+              $readme = $readme -replace "\[!\[Build\].*", $newBadgeLine
+            }
+            else {
+              $readme = "$newBadgeLine`n$readme"
+            }
+
             Set-Content "README.md" $readme -NoNewline
           }
 
