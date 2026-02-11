@@ -2,6 +2,7 @@ name: Publish
 
 on:
   push:
+    branches: [ main ]
     tags: [ 'v*' ]
   workflow_dispatch:
 
@@ -14,11 +15,13 @@ jobs:
   # --------------------------------------------------
   setup:
     runs-on: ubuntu-latest
+
     outputs:
       project: ${{ steps.det.outputs.project }}
       id: ${{ steps.det.outputs.id }}
       runner: ${{ steps.det.outputs.runner }}
       version: ${{ steps.det.outputs.version }}
+
     steps:
       - name: クローン
         uses: actions/checkout@v4
@@ -35,7 +38,7 @@ jobs:
           $p = $projs | Where-Object { (Get-Content $_.FullName -Raw) -match "<PackageId>|<GeneratePackageOnBuild>True" } | Select-Object -First 1
           if (!$p) { $p = $projs | Select-Object -First 1 }
 
-          # 3. MSBuild プロパティの解決 ( $(Prop) 形式の再帰展開に対応 )
+          # 3. MSBuild プロパティの解決
           [xml]$xml = Get-Content $p.FullName
           $props = $xml.Project.PropertyGroup
           function Get-Property($name) {
@@ -49,7 +52,7 @@ jobs:
             return $null
           }
 
-          # 4. バージョンとパッケージIDの取得 (不在時は 0.0.1 fallback)
+          # 4. バージョンとパッケージIDの取得 (不在時は 0.0.1)
           $v = Get-Property "Version"
           if ([string]::IsNullOrWhiteSpace($v)) { $v = "0.0.1" }
           $id = Get-Property "PackageId" -or Get-Property "AssemblyName" -or $p.BaseName
@@ -59,30 +62,33 @@ jobs:
           $isWin = $content -match "<UseWinUI>true</UseWinUI>|<UseWPF>true</UseWPF>|<UseWindowsForms>true</UseWindowsForms>|-windows"
           $run = if ($isWin) { "windows-latest" } else { "ubuntu-latest" }
 
-          # 6. 相対パスの算出と結果の出力
+          # 6. 結果の出力
           $rel = $p.FullName.Replace($PWD.Path, "").TrimStart("\").TrimStart("/")
-          Write-Host "Detected Project: $rel, ID: $id, Runner: $run, Version: $v"
-
+          Write-Host "Detected: Project=$rel, ID=$id, Runner=$run, Version=$v"
           "project=$rel" | Add-Content $env:GITHUB_OUTPUT
           "id=$id"        | Add-Content $env:GITHUB_OUTPUT
           "runner=$run"    | Add-Content $env:GITHUB_OUTPUT
           "version=$v"     | Add-Content $env:GITHUB_OUTPUT
 
   # --------------------------------------------------
-  # 2. Build & Sync (ビルド・テスト・自動同期)
+  # 2. Build & Sync (共通: ビルド・テスト・同期)
   # --------------------------------------------------
   build:
     needs: setup
     runs-on: ${{ needs.setup.outputs.runner }}
+
     env:
       PROJ_PATH: ${{ needs.setup.outputs.project }}
       PKG_ID: ${{ needs.setup.outputs.id }}
+
     steps:
       - name: 構成情報の出力
         run: |
           echo "Project Path: ${{ env.PROJ_PATH }}"
           echo "Package ID:   ${{ env.PKG_ID }}"
-          echo "Ref:          ${{ github.ref }}"
+          echo "Target Runner: ${{ needs.setup.outputs.runner }}"
+          echo "GitHub Ref:   ${{ github.ref }}"
+          echo "Ref Type:     ${{ github.ref_type }}"
 
       - name: クローン
         uses: actions/checkout@v4
@@ -96,17 +102,16 @@ jobs:
             8.0.x
             10.0.x
 
-      - name: メタデータ & README バッジ同期
+      - name: バージョン & バッジ同期
         shell: pwsh
         run: |
-          # 1. タグ push 時は csproj の Version をタグ名（v除去）に強制同期
+          # 1. タグ push 時のみ csproj の Version を同期
           [xml]$xml = Get-Content $env:PROJ_PATH
           if ("${{ github.ref_type }}" -eq "tag") {
             $tagV = "${{ github.ref_name }}".TrimStart('v')
             $vNode = $xml.Project.PropertyGroup | Where-Object { $_.Version } | Select-Object -First 1
-            if ($vNode) { 
-              $vNode.Version = $tagV 
-            } else { 
+            if ($vNode) { $vNode.Version = $tagV } 
+            else { 
               $newV = $xml.CreateElement("Version")
               $newV.InnerText = $tagV
               $xml.Project.PropertyGroup[0].AppendChild($newV)
@@ -114,21 +119,19 @@ jobs:
             $xml.Save($env:PROJ_PATH)
           }
 
-          # 2. README バッジ (Build/NuGet) の自動更新
+          # 2. README バッジ同期
           if (Test-Path "README.md") {
             $readme = Get-Content "README.md" -Raw
             $repo = "${{ github.repository }}"
-            $buildB = "[![Build](https://github.com/$repo/actions/workflows/ci.yml/badge.svg)](https://github.com/$repo/actions/workflows/ci.yml)"
+            $buildB = "[![Build](https://github.com/$repo/actions/workflows/publish.yml/badge.svg)](https://github.com/$repo/actions/workflows/publish.yml)"
             $nugetB = "[![NuGet](https://img.shields.io/nuget/v/$($env:PKG_ID).svg)](https://www.nuget.org/packages/$($env:PKG_ID)/)"
-
             if ($readme -notmatch "\[!\[Build\]") { $readme = "$buildB`n$readme" }
-            # [![]()]() 形式を確実に置換
             if ($readme -match "\[!\[NuGet\]") { $readme = $readme -replace '\[!\[NuGet\].*?\)\]\(.*?\)', $nugetB }
             elseif ($readme -match "\[!\[Build\]") { $readme = $readme -replace '(\[!\[Build\].*?\)\]\(.*?\))', "`$1 $nugetB" }
             Set-Content "README.md" $readme -NoNewline
           }
 
-          # 3. 差分があれば自動コミット (skip ci 付与)
+          # 3. 変更があればコミット
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add .
@@ -141,12 +144,15 @@ jobs:
         shell: pwsh
         run: |
           dotnet build "$env:PROJ_PATH" -c Release
-          # Test プロジェクトが存在する場合のみ実行
           Get-ChildItem -Recurse -Filter "*[Tt]est*.csproj" | Where-Object { $_.FullName -notmatch "obj|bin" } | ForEach-Object {
             dotnet test $_.FullName -c Release
           }
 
-      - name: アーティファクトのアップロード
+      - name: パッケージ作成の検証
+        shell: pwsh
+        run: dotnet pack "$env:PROJ_PATH" -c Release -o dist-check
+
+      - name: アーティファクト保存
         uses: actions/upload-artifact@v4
         with:
           name: build-assets
@@ -163,13 +169,16 @@ jobs:
     # タグ push 時、かつプレリリース（ハイフン付き）でない場合のみ実行
     if: startsWith(github.ref, 'refs/tags/v') && !contains(github.ref_name, '-')
     runs-on: ubuntu-latest
+
     env:
       PROJ_PATH: ${{ needs.setup.outputs.project }}
+
     steps:
       - name: 構成情報の出力
         run: |
-          echo "Version:      ${{ github.ref_name }}"
-          echo "Target Project: ${{ env.PROJ_PATH }}"
+          echo "Release Version: ${{ github.ref_name }}"
+          echo "Target Project:  ${{ env.PROJ_PATH }}"
+          echo "Package ID:      ${{ needs.setup.outputs.id }}"
 
       - name: クローン
         uses: actions/checkout@v4
@@ -181,15 +190,16 @@ jobs:
             8.0.x
             10.0.x
 
-      - name: ビルド資産の取得
+      - name: ビルド結果の取得
         uses: actions/download-artifact@v4
         with:
           name: build-assets
 
-      - name: 復元してパッキング
+      - name: パッキング
+        shell: pwsh
         run: dotnet pack "$env:PROJ_PATH" -c Release --no-build -o dist
 
-      - name: GitHub リリースの作成
+      - name: GitHub Release
         uses: softprops/action-gh-release@v1
         with:
           files: dist/*.nupkg
