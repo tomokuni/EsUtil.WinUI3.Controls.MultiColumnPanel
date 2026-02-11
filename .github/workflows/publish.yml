@@ -131,6 +131,8 @@ jobs:
           dotnet-version: |
             8.0.x
             10.0.x
+          cache: true
+          cache-dependency-path: '**/*.csproj'
 
       - name: バージョン & バッジ同期
         shell: pwsh
