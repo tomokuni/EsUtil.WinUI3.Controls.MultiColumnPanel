@@ -1,3 +1,9 @@
+> [!IMPORTANT]
+> このリポジトリは [EsUtil](https://github.com/tomokuni/EsUtil) へ**移行（マージ）**しました。 今後の更新は行いません。
+>
+> - 後継: [`EsUtil.Ui.WinUI3.ColumnPacking`](https://github.com/tomokuni/EsUtil/tree/main/EsUtil.Ui.WinUI3/ColumnPacking)（NuGet: [`EsUtil.Ui.WinUI3.ColumnPacking`](https://www.nuget.org/packages/EsUtil.Ui.WinUI3.ColumnPacking)）
+> - 配置計算は [`EsUtil.Feature.ColumnPacking.Core`](https://github.com/tomokuni/EsUtil/tree/main/EsUtil/Feature.ColumnPacking.Core) を参照してください。
+
 # MultiColumnPanel
 [![.NET](https://img.shields.io/badge/.NET-10.0-512bd4.svg?logo=dotnet)](https://dotnet.microsoft.com/) [![WinUI 3](https://img.shields.io/badge/WinUI-3-0078d4.svg?logo=windows)](https://learn.microsoft.com/windows/apps/winui/winui3/) [![Build](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/actions/workflows/publish.yml/badge.svg)](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/actions/workflows/publish.yml) [![GitHub release](https://img.shields.io/github/v/release/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel.svg)](https://github.com/tomokuni/EsUtil.WinUI3.Controls.MultiColumnPanel/releases) [![NuGet](https://img.shields.io/nuget/v/EsUtil.WinUI3.Controls.MultiColumnPanel.svg)](https://www.nuget.org/packages/EsUtil.WinUI3.Controls.MultiColumnPanel/)
 
